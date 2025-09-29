@@ -69,59 +69,46 @@ def fetch_fred_series(series_id: str) -> pd.DataFrame:
 # ---------- NY Fed term premium ----------
 @st.cache_data(ttl=60*30, show_spinner=False)
 def fetch_tp10() -> pd.DataFrame:
-    url = "https://www.newyorkfed.org/medialibrary/media/research/data_indicators/ACMTP.csv"
-    r = requests.get(url, timeout=30)
-    r.raise_for_status()
-    df = pd.read_csv(io.StringIO(r.text))
-    df = df[["Date", "TP10"]].copy()
-    df.columns = ["Date", "Value"]
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    df["Value"] = pd.to_numeric(df["Value"], errors="coerce")
-    df["Name"] = "TP10"
-    return df.dropna(subset=["Date"])
+    """
+    Robust NY Fed term premium fetch.
+    Handles redirects and strips preamble lines until the real CSV header.
+    """
+    import requests, io, pandas as pd, numpy as np
 
-def latest_value(df_all: pd.DataFrame, name: str):
-    sub = df_all[df_all["Name"] == name]
-    if sub.empty:
-        return np.nan, None
-    row = sub.sort_values("Date").iloc[-1]
-    return float(row["Value"]), pd.to_datetime(row["Date"]).date()
-
-def color_from_rule(val, green_cond, yellow_cond):
-    try:
-        if val is None or (isinstance(val, float) and np.isnan(val)):
-            return "#EEE"
-        if green_cond(val):
-            return "#C6EFCE"
-        if yellow_cond(val):
-            return "#FFEB9C"
-        return "#FFC7CE"
-    except Exception:
-        return "#EEE"
-
-# ---------- Load all data (tolerant) ----------
-with st.spinner("Fetching data..."):
-    frames, fetch_errors = [], []
-    for sid in CFG["series"]["fred"]:
+    urls = [
+        "https://www.newyorkfed.org/medialibrary/media/research/data_indicators/ACMTP.csv",
+        "https://www.newyorkfed.org/medialibrary/media/research/data_indicators/ACMTP.csv?download=true",
+        "https://www.newyorkfed.org/research/data_indicators/ACMTP.csv",
+    ]
+    headers = {
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36")
+    }
+    last_err = None
+    for url in urls:
         try:
-            frames.append(fetch_fred_series(sid))
+            r = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
+            r.raise_for_status()
+            text = r.text
+
+            # Some responses include preamble lines. Keep from the row that has both Date and TP10.
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            hdr_idx = next(i for i, ln in enumerate(lines)
+                           if ("date" in ln.lower() and "tp10" in ln.lower()))
+            csv_text = "\n".join(lines[hdr_idx:])
+
+            df = pd.read_csv(io.StringIO(csv_text))
+            df = df[["Date", "TP10"]].copy()
+            df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+            df["TP10"] = pd.to_numeric(df["TP10"], errors="coerce")
+            out = df.rename(columns={"TP10": "Value"})
+            out["Name"] = "TP10"
+            return out.dropna(subset=["Date"])
         except Exception as e:
-            fetch_errors.append(f"{sid}: {e}")
+            last_err = e
+            continue
+    raise RuntimeError(f"Failed to fetch TP10: {last_err}")
 
-    if CFG["series"].get("nyfed_tp10", True):
-        try:
-            frames.append(fetch_tp10())
-        except Exception as e:
-            fetch_errors.append(f"TP10: {e}")
-
-    if not frames:
-        st.error("No data could be loaded. Please refresh or try again.")
-        st.stop()
-
-    data = pd.concat(frames, ignore_index=True).dropna(subset=["Value"])
-
-    if fetch_errors:
-        st.warning("Some series failed to load:\n- " + "\n- ".join(fetch_errors))
 
 # ---------- Compute macro tiles ----------
 y10, y10_date = latest_value(data, "DGS10")
