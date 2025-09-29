@@ -1,46 +1,33 @@
-# === Thresholds and settings you can tweak ===
-# All rates are in decimal (0.04 = 4%). Spreads in basis points where noted.
-tiles:
-  y10_green_max: 0.040
-  y10_yellow_max: 0.0425
-
-  tips_green_max: 0.018
-  tips_yellow_max: 0.020
-
-  tp10_green_max: 0.010
-  tp10_yellow_max: 0.012
-
-  dxy_green_max: 103.0
-  dxy_yellow_max: 104.0
-
-  pmi_green_min: 50.0
-  pmi_yellow_min: 49.0
-
-  hyoas_green_max_bps: 450.0
-  hyoas_yellow_max_bps: 500.0
-
-  curve_green_min_bps: 0.0      # 10y-2y in bps
-  curve_yellow_min_bps: -25.0
-
-  wti_green_min: 60.0
-  wti_yellow_min: 50.0
-
-# Series IDs we download from FRED/NYFed (stable "downloaddata" endpoints).
 series:
   fred:
-    - DGS10
-    - DGS2
-    - DGS3MO
-    - DFII10
-    - NAPMNO
-    - BAMLH0A0HYM2
+    - DGS10        # 10y
+    - DGS2         # 2y
+    - DGS3MO       # 3m bill
+    - DFII10       # 10y TIPS (real)
+    - NAPM         # ISM PMI (composite)  <-- proxy for New Orders (no API key needed)
+    - BAMLH0A0HYM2 # HY OAS
     - SP500
-    - DCOILWTICO
-    - DHHNGSP
-    - CBBTCUSD
-    - CBETHUSD
-    - DTWEXBGS   # Broad Dollar Index (proxy for DXY)
+    - DCOILWTICO   # WTI
+    - DHHNGSP      # Henry Hub
+    - CBBTCUSD     # BTC/USD
+    - CBETHUSD     # ETH/USD
+    - DTWEXBGS     # Broad $ index (FRED)
   nyfed_tp10: true
 
-# Auto-refresh (seconds). Set 0 to disable.
-autorefresh_secs: 0
+tiles:
+  y10_green_max: 0.042
+  y10_yellow_max: 0.052
+  tips_green_max: 0.018
+  tips_yellow_max: 0.022
+  tp10_green_max: 0.003
+  tp10_yellow_max: 0.008
+  dxy_green_max: 102.5
+  dxy_yellow_max: 104.0
+  pmi_green_min: 52.0
+  pmi_yellow_min: 50.0
+  hyoas_green_max_bps: 325
+  hyoas_yellow_max_bps: 400
+  curve_green_min_bps: 0
+  curve_yellow_min_bps: -30
+  wti_green_min: 60
+  wti_yellow_min: 50
