@@ -174,7 +174,7 @@ y3m, _ = latest_value(data, "DGS3MO")
 tips, _ = latest_value(data, "DFII10")
 tp10, _ = latest_value(data, "TP10")
 dxy, _  = latest_value(data, "DTWEXBGS")   # broad USD index proxy (stable)
-pmi, _  = latest_value(data, "NAPMNOI")    # PMI New Orders (ISM)
+pmi, _  = latest_value(data, "NAPMNO")    # PMI New Orders (ISM)
 oas, _  = latest_value(data, "BAMLH0A0HYM2")
 wti, _  = latest_value(data, "DCOILWTICO")
 
