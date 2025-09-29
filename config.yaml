@@ -4,7 +4,8 @@ series:
     - DGS2         # 2y
     - DGS3MO       # 3m bill
     - DFII10       # 10y TIPS (real)
-    - NAPM         # ISM PMI (composite)  <-- proxy for New Orders (no API key needed)
+    - CFNAIMA3     # Cycle proxy (CFNAI 3m avg)  <-- NEW
+    - T10Y3M       # Term-premium proxy (10y-3m slope, % ) <-- NEW
     - BAMLH0A0HYM2 # HY OAS
     - SP500
     - DCOILWTICO   # WTI
@@ -12,19 +13,24 @@ series:
     - CBBTCUSD     # BTC/USD
     - CBETHUSD     # ETH/USD
     - DTWEXBGS     # Broad $ index (FRED)
-  nyfed_tp10: true
+  nyfed_tp10: false  # disable NY Fed TP10 fetch
 
 tiles:
   y10_green_max: 0.042
   y10_yellow_max: 0.052
   tips_green_max: 0.018
   tips_yellow_max: 0.022
-  tp10_green_max: 0.003
-  tp10_yellow_max: 0.008
+
+  # cycle (CFNAI 3m average)
+  cfnai_green_min: 0.00
+  cfnai_yellow_min: -0.20
+
+  # term-premium proxy (10y-3m slope) – thresholds in bps
+  t103m_green_min_bps: 0
+  t103m_yellow_min_bps: -30
+
   dxy_green_max: 102.5
   dxy_yellow_max: 104.0
-  pmi_green_min: 52.0
-  pmi_yellow_min: 50.0
   hyoas_green_max_bps: 325
   hyoas_yellow_max_bps: 400
   curve_green_min_bps: 0
