@@ -1,11 +1,9 @@
-import os, io
+import os, io, time
 from datetime import datetime
 import pandas as pd
 import numpy as np
 import requests
 import streamlit as st
-from dateutil import tz
-import plotly.graph_objects as go
 import yaml
 
 st.set_page_config(page_title="ETF Macro Agent Dashboard", layout="wide")
@@ -17,29 +15,58 @@ with open(CFG_PATH, "r") as f:
 
 TH = CFG["tiles"]
 
-# ---------- Helpers ----------
+# ---------- Robust FRED fetcher ----------
 @st.cache_data(ttl=60*15, show_spinner=False)
 def fetch_fred_series(series_id: str) -> pd.DataFrame:
     """
-    Downloads a FRED series from the stable 'downloaddata' endpoint.
+    Robust fetch for a single FRED series.
+    Tries 'downloaddata' (full history) and falls back to 'fredgraph.csv'.
+    Adds a browser-like User-Agent and retries to survive redirects/timeouts.
     Returns columns: Date, Name, Value
     """
-    url = f"https://fred.stlouisfed.org/series/{series_id}/downloaddata/{series_id}.csv"
-    r = requests.get(url, timeout=30)
-    r.raise_for_status()
-    df = pd.read_csv(io.StringIO(r.text))
-    # Normalize columns
-    date_col = df.columns[0]
-    val_col = df.columns[1]
-    df = df[[date_col, val_col]].copy()
-    df.columns = ["Date", "Value"]
-    # Convert
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    # Some FRED series have '.' for missing values
-    df["Value"] = pd.to_numeric(df["Value"], errors="coerce")
-    df["Name"] = series_id
-    return df.dropna(subset=["Date"])
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
+        )
+    }
+    urls = [
+        f"https://fred.stlouisfed.org/series/{series_id}/downloaddata/{series_id}.csv",
+        f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}",
+    ]
 
+    last_err = None
+    for url in urls:
+        for attempt in range(3):  # simple retry
+            try:
+                r = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
+                r.raise_for_status()
+                df = pd.read_csv(io.StringIO(r.text))
+
+                # Normalize likely column names
+                if "DATE" in df.columns:
+                    date_col = "DATE"
+                elif "observation_date" in df.columns:
+                    date_col = "observation_date"
+                else:
+                    date_col = df.columns[0]
+
+                val_col = series_id if series_id in df.columns else df.columns[1]
+
+                out = df[[date_col, val_col]].copy()
+                out.columns = ["Date", "Value"]
+                out["Date"] = pd.to_datetime(out["Date"], errors="coerce")
+                out["Value"] = pd.to_numeric(out["Value"], errors="coerce")
+                out["Name"]  = series_id
+                return out.dropna(subset=["Date"])
+            except Exception as e:
+                last_err = e
+                time.sleep(1.5)  # backoff then retry
+                continue
+
+    raise RuntimeError(f"Failed to fetch {series_id}: {last_err}")
+
+# ---------- NY Fed term premium ----------
 @st.cache_data(ttl=60*30, show_spinner=False)
 def fetch_tp10() -> pd.DataFrame:
     url = "https://www.newyorkfed.org/medialibrary/media/research/data_indicators/ACMTP.csv"
@@ -61,7 +88,6 @@ def latest_value(df_all: pd.DataFrame, name: str):
     return float(row["Value"]), pd.to_datetime(row["Date"]).date()
 
 def color_from_rule(val, green_cond, yellow_cond):
-    """Return CSS color for tile backgrounds: green/yellow/red"""
     try:
         if val is None or (isinstance(val, float) and np.isnan(val)):
             return "#EEE"
@@ -73,15 +99,29 @@ def color_from_rule(val, green_cond, yellow_cond):
     except Exception:
         return "#EEE"
 
-# ---------- Load all data ----------
+# ---------- Load all data (tolerant) ----------
 with st.spinner("Fetching data..."):
-    frames = []
+    frames, fetch_errors = [], []
     for sid in CFG["series"]["fred"]:
-        frames.append(fetch_fred_series(sid))
+        try:
+            frames.append(fetch_fred_series(sid))
+        except Exception as e:
+            fetch_errors.append(f"{sid}: {e}")
+
     if CFG["series"].get("nyfed_tp10", True):
-        frames.append(fetch_tp10())
-    data = pd.concat(frames, ignore_index=True)
-    data = data.dropna(subset=["Value"])
+        try:
+            frames.append(fetch_tp10())
+        except Exception as e:
+            fetch_errors.append(f"TP10: {e}")
+
+    if not frames:
+        st.error("No data could be loaded. Please refresh or try again.")
+        st.stop()
+
+    data = pd.concat(frames, ignore_index=True).dropna(subset=["Value"])
+
+    if fetch_errors:
+        st.warning("Some series failed to load:\n- " + "\n- ".join(fetch_errors))
 
 # ---------- Compute macro tiles ----------
 y10, y10_date = latest_value(data, "DGS10")
@@ -89,22 +129,16 @@ y2, _  = latest_value(data, "DGS2")
 y3m, _ = latest_value(data, "DGS3MO")
 tips, _ = latest_value(data, "DFII10")
 tp10, _ = latest_value(data, "TP10")
-dxy, _  = latest_value(data, "DTWEXBGS")  # broad USD index
+dxy, _  = latest_value(data, "DTWEXBGS")  # broad USD index proxy
 pmi, _  = latest_value(data, "NAPMNO")
 oas, _  = latest_value(data, "BAMLH0A0HYM2")
 wti, _  = latest_value(data, "DCOILWTICO")
 
-# Convert to decimals if needed (FRED yields sometimes look like percentages)
 def to_decimal(x):
     if pd.isna(x): return np.nan
-    return x/100 if x>1 else x
+    return x/100 if x > 1 else x
 
-y10d = to_decimal(y10)
-y2d  = to_decimal(y2)
-y3md = to_decimal(y3m)
-tipsd= to_decimal(tips)
-tp10d= to_decimal(tp10)
-
+y10d, y2d, y3md, tipsd, tp10d = map(to_decimal, [y10, y2, y3m, tips, tp10])
 curve_bps = (y10d - y2d) * 10000 if (pd.notna(y10d) and pd.notna(y2d)) else np.nan
 
 tiles = [
@@ -123,7 +157,6 @@ tiles = [
 st.title("ETF Macro Agent Dashboard")
 st.caption("Data: FRED & NY Fed. USD tile uses FRED Broad Dollar Index (DTWEXBGS). Thresholds in config.yaml.")
 
-# Top tiles
 cols = st.columns(len(tiles))
 for i, (label, val, green_fn, yellow_fn) in enumerate(tiles):
     bg = color_from_rule(val, green_fn, yellow_fn)
@@ -137,7 +170,6 @@ for i, (label, val, green_fn, yellow_fn) in enumerate(tiles):
             """,
             unsafe_allow_html=True
         )
-
 st.write(f"**As of:** {y10_date or '—'}")
 
 # ---------- ETF mapping & signals ----------
@@ -204,10 +236,7 @@ def signal_for(tk: str) -> str:
         return "GREEN" if (pmi>=TH["pmi_green_min"] and dxy<=TH["dxy_green_max"]) else ("YELLOW" if pmi>=TH["pmi_yellow_min"] else "RED")
     return "SETUP"
 
-rows = []
-for tk, note in ETF_ROWS:
-    rows.append((tk, signal_for(tk), note))
-
+rows = [(tk, signal_for(tk), note) for tk, note in ETF_ROWS]
 etf_df = pd.DataFrame(rows, columns=["Ticker","Signal","Why it moves"])
 
 def style_signals(df):
