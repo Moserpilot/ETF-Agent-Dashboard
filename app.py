@@ -71,26 +71,32 @@ def fetch_fred_series(series_id: str) -> pd.DataFrame:
 @st.cache_data(ttl=60*30, show_spinner=False)
 def fetch_tp10() -> pd.DataFrame:
     """
-    Robust NY Fed term premium fetch.
-    Handles redirects and strips any preamble before the real CSV header.
+    Robust NY Fed term premium fetch (no API).
+    Tries several official URLs, follows redirects, and strips any preamble
+    before the actual CSV header. Returns Date/Value for TP10.
     """
-    urls = [
+    import requests, io, pandas as pd, numpy as np
+
+    url_candidates = [
+        # Primary (NY Fed)
         "https://www.newyorkfed.org/medialibrary/media/research/data_indicators/ACMTP.csv",
         "https://www.newyorkfed.org/medialibrary/media/research/data_indicators/ACMTP.csv?download=true",
         "https://www.newyorkfed.org/research/data_indicators/ACMTP.csv",
+        # CDN mirror occasionally used by the site
+        "https://nyfed.org/medialibrary/media/research/data_indicators/ACMTP.csv",
     ]
     headers = {
         "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36")
     }
     last_err = None
-    for url in urls:
+    for url in url_candidates:
         try:
             r = requests.get(url, headers=headers, timeout=30, allow_redirects=True)
             r.raise_for_status()
             text = r.text
 
-            # Some responses contain a preamble; find the row with both Date and TP10
+            # Remove any preamble; find the header row containing both Date and TP10
             lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
             hdr_idx = next(i for i, ln in enumerate(lines)
                            if ("date" in ln.lower() and "tp10" in ln.lower()))
@@ -107,6 +113,7 @@ def fetch_tp10() -> pd.DataFrame:
             last_err = e
             continue
     raise RuntimeError(f"Failed to fetch TP10: {last_err}")
+
 
 # =========================================================
 # 3) Small helpers
